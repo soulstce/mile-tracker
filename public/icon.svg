@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g" x1="92" y1="76" x2="420" y2="434" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B5CF6" />
+      <stop offset="1" stop-color="#EC4899" />
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="512" height="512" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix" />
+      <feColorMatrix in="SourceAlpha" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha" />
+      <feOffset dy="18" />
+      <feGaussianBlur stdDeviation="24" />
+      <feComposite in2="hardAlpha" operator="out" />
+      <feColorMatrix values="0 0 0 0 0.19 0 0 0 0 0.11 0 0 0 0 0.37 0 0 0 0 0.55 0" />
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow" />
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow" result="shape" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="#05010A" />
+  <circle cx="256" cy="256" r="176" fill="url(#g)" fill-opacity="0.12" />
+  <g filter="url(#shadow)">
+    <rect x="106" y="106" width="300" height="300" rx="88" fill="#0D0B16" stroke="rgba(255,255,255,0.1)" />
+    <path d="M162 351C205 305 223 250 256 166C289 250 307 305 350 351" stroke="url(#g)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M197 211H315" stroke="#F5F3FF" stroke-opacity="0.8" stroke-width="20" stroke-linecap="round" />
+    <path d="M197 301H315" stroke="#F5F3FF" stroke-opacity="0.35" stroke-width="20" stroke-linecap="round" />
+  </g>
+</svg>
