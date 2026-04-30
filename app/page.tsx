@@ -148,29 +148,52 @@ function normalizeSuggestion(result: GeocodeResult): PlaceSuggestion {
   };
 }
 
+function normalizeSearchQuery(query: string) {
+  return query
+    .trim()
+    .replace(/\b(city|town|village|municipality)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+,/g, ',')
+    .trim();
+}
+
 function scoreUtahSuggestion(suggestion: PlaceSuggestion, query: string) {
   const text = suggestion.label.toLowerCase();
   const subtitle = suggestion.subtitle.toLowerCase();
-  const queryText = query.toLowerCase();
-  const queryTokens = queryText.split(/[^a-z0-9]+/).filter(Boolean);
-  const tokenMatches = queryTokens.reduce((count, token) => count + (text.includes(token) ? 1 : 0), 0);
-  const prefixMatch = queryTokens.some((token) => text.startsWith(token)) ? 1.5 : 0;
+  const normalizedQuery = normalizeSearchQuery(query).toLowerCase();
+  const queryTokens = normalizedQuery.split(/[^a-z0-9]+/).filter(Boolean);
+  const labelTokens = text.split(/[^a-z0-9]+/).filter(Boolean);
+  const exactMatch = text === normalizedQuery ? 8 : 0;
+  const startsWith = text.startsWith(normalizedQuery) ? 5 : 0;
+  const tokenCoverage = queryTokens.reduce((count, token) => count + (text.includes(token) ? 1 : 0), 0);
+  const labelCoverage = labelTokens.reduce((count, token) => count + (normalizedQuery.includes(token) ? 0.5 : 0), 0);
   const utahBonus = subtitle.includes('utah') ? 1.5 : 0;
-  const importanceBonus = suggestion.label.length > 0 ? 0 : 0;
-  return tokenMatches + prefixMatch + utahBonus + importanceBonus;
+  const localityBonus = /\b(alpine|orem|provo|lehi|pleasant grove|american fork|saratoga springs|springville)\b/i.test(text) ? 0.75 : 0;
+  return exactMatch + startsWith + tokenCoverage * 2 + labelCoverage + utahBonus + localityBonus;
 }
 
 function buildSearchQueries(query: string) {
-  const normalized = query.trim();
+  const normalized = normalizeSearchQuery(query);
   const lowered = normalized.toLowerCase();
   const variants = new Set<string>([normalized]);
+  const strippedCity = normalized.replace(/\b(city|town|village|municipality)\b/gi, '').replace(/\s+/g, ' ').trim();
 
-  const hasUtahContext = ['utah', 'ut ', ', ut', 'ut.'].some((term) => lowered.includes(term));
+  if (strippedCity && strippedCity !== normalized) {
+    variants.add(strippedCity);
+  }
+
+  const hasUtahContext = ['utah', ' ut', 'ut,', ', ut', ' ut.', ' utah county'].some((term) => lowered.includes(term));
   if (!hasUtahContext) {
     variants.add(`${normalized}, Utah`);
     variants.add(`${normalized} Utah`);
     variants.add(`${normalized}, UT`);
     variants.add(`${normalized} UT`);
+    if (strippedCity && strippedCity !== normalized) {
+      variants.add(`${strippedCity}, Utah`);
+      variants.add(`${strippedCity} Utah`);
+      variants.add(`${strippedCity}, UT`);
+      variants.add(`${strippedCity} UT`);
+    }
   }
 
   return [...variants].filter(Boolean);
@@ -181,7 +204,7 @@ async function searchLocations(query: string) {
   const settled = await Promise.allSettled(
     queries.map(async (searchQuery) => {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&countrycodes=us&addressdetails=1&namedetails=1&accept-language=en&q=${encodeURIComponent(searchQuery)}&viewbox=${UTAH_STATE_VIEWBOX.left},${UTAH_STATE_VIEWBOX.top},${UTAH_STATE_VIEWBOX.right},${UTAH_STATE_VIEWBOX.bottom}&bounded=0`
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=12&countrycodes=us&addressdetails=1&namedetails=1&accept-language=en&q=${encodeURIComponent(searchQuery)}&viewbox=${UTAH_STATE_VIEWBOX.left},${UTAH_STATE_VIEWBOX.top},${UTAH_STATE_VIEWBOX.right},${UTAH_STATE_VIEWBOX.bottom}&bounded=0`
       );
       if (!response.ok) {
         throw new Error('Autocomplete is temporarily unavailable.');
@@ -673,6 +696,11 @@ export default function Page() {
     setOriginToolsOpen(false);
   }
 
+  function useSavedOriginLocation(location: string) {
+    setForm((current) => ({ ...current, from: location }));
+    setOriginToolsOpen(false);
+  }
+
   useEffect(() => {
     if (!distanceLookupOpen) return;
 
@@ -953,8 +981,21 @@ export default function Page() {
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <label className="grid gap-2 text-sm text-white/70">
-                        From
+                      <div className="relative grid gap-2 text-sm text-white/70">
+                        <div className="flex items-center justify-between gap-2">
+                          <label>From</label>
+                          <button
+                            type="button"
+                            aria-label="Saved and default locations"
+                            onClick={() => setOriginToolsOpen((current) => !current)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/75 transition-colors hover:bg-white/10"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                              <path d="M12 21s6-4.5 6-10.2A6 6 0 0 0 6 10.8C6 16.5 12 21 12 21Z" stroke="currentColor" strokeWidth="1.8" />
+                              <circle cx="12" cy="10.6" r="1.8" stroke="currentColor" strokeWidth="1.8" />
+                            </svg>
+                          </button>
+                        </div>
                         <input
                           type="text"
                           value={form.from}
@@ -962,7 +1003,57 @@ export default function Page() {
                           placeholder="Home"
                           className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
                         />
-                      </label>
+                        {originToolsOpen ? (
+                          <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-10 rounded-2xl border border-white/10 bg-black/90 p-2 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
+                            {state.defaultLocation ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setForm((current) => ({ ...current, from: state.defaultLocation }));
+                                  setOriginToolsOpen(false);
+                                }}
+                                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10"
+                              >
+                                <span>Use default location</span>
+                                <span className="text-xs text-violet-200">{state.defaultLocation}</span>
+                              </button>
+                            ) : null}
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextDefault = form.from.trim();
+                                if (!nextDefault) return;
+                                updateState({
+                                  ...state,
+                                  defaultLocation: nextDefault
+                                });
+                                setOriginToolsOpen(false);
+                              }}
+                              disabled={!form.from.trim()}
+                              className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <span>Set current as default</span>
+                              <span className="text-xs text-white/45">saved on this device</span>
+                            </button>
+
+                            {savedLocations.length > 0 ? (
+                              <div className="mt-2 max-h-52 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-white/5 p-1" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}>
+                                {savedLocations.map((location) => (
+                                  <button
+                                    key={location}
+                                    type="button"
+                                    onClick={() => useSavedOriginLocation(location)}
+                                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10"
+                                  >
+                                    {location}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
                       <label className="grid gap-2 text-sm text-white/70">
                         To
                         <input
@@ -1156,7 +1247,7 @@ export default function Page() {
               <div>
                 <h2 className="text-xl font-semibold">Distance lookup</h2>
                 <p className="mt-1 text-sm text-white/55">Look up the distance between two locations and copy it into Miles.</p>
-                <p className="mt-2 text-xs uppercase tracking-[0.22em] text-white/35">Search favors Utah broadly.</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.22em] text-white/35">Search favors Utah broadly, but keeps exact city matches prioritized.</p>
               </div>
               <button
                 type="button"
