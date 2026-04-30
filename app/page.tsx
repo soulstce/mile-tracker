@@ -54,6 +54,8 @@ type DistanceLookupState = {
   loading: boolean;
   error: string;
   result: DistanceLookupResult | null;
+  originSuggestions: PlaceSuggestion[];
+  destinationSuggestions: PlaceSuggestion[];
 };
 
 const STORAGE_KEY = 'mile-tracker-state';
@@ -100,24 +102,85 @@ type GeocodeResult = {
   display_name: string;
   lat: string;
   lon: string;
+  importance?: number;
+  address?: {
+    city?: string;
+    town?: string;
+    village?: string;
+    county?: string;
+    state?: string;
+    country?: string;
+  };
 };
 
-async function geocodeLocation(query: string) {
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`);
+type PlaceSuggestion = {
+  label: string;
+  subtitle: string;
+  lat: number;
+  lon: number;
+};
+
+const UTAH_COUNTY_VIEWBOX = {
+  left: -112.12,
+  top: 40.43,
+  right: -111.38,
+  bottom: 39.84
+};
+
+function formatSuggestionSubtitle(result: GeocodeResult) {
+  const parts = [
+    result.address?.city || result.address?.town || result.address?.village,
+    result.address?.county,
+    result.address?.state
+  ].filter(Boolean) as string[];
+
+  return parts.join(' · ');
+}
+
+function normalizeSuggestion(result: GeocodeResult): PlaceSuggestion {
+  return {
+    label: result.display_name,
+    subtitle: formatSuggestionSubtitle(result),
+    lat: Number(result.lat),
+    lon: Number(result.lon)
+  };
+}
+
+function scoreUtahCountySuggestion(suggestion: PlaceSuggestion) {
+  const text = suggestion.label.toLowerCase();
+  const localHits = ['orem', 'provo', 'pleasant grove', 'american fork', 'lehi', 'vineyard', 'saratoga springs', 'springville', 'orem, ut', 'provo, ut'];
+  const cityBonus = localHits.some((term) => text.includes(term)) ? 2 : 0;
+  const countyBonus = text.includes('utah county') ? 1 : 0;
+  const nearBonus = suggestion.lat >= 39.84 && suggestion.lat <= 40.43 && suggestion.lon >= -112.12 && suggestion.lon <= -111.38 ? 3 : 0;
+  return nearBonus + cityBonus + countyBonus;
+}
+
+async function searchLocations(query: string) {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=7&countrycodes=us&addressdetails=1&accept-language=en&q=${encodeURIComponent(query)}&viewbox=${UTAH_COUNTY_VIEWBOX.left},${UTAH_COUNTY_VIEWBOX.top},${UTAH_COUNTY_VIEWBOX.right},${UTAH_COUNTY_VIEWBOX.bottom}&bounded=0`
+  );
   if (!response.ok) {
-    throw new Error('Distance lookup is temporarily unavailable.');
+    throw new Error('Autocomplete is temporarily unavailable.');
   }
 
   const results = (await response.json()) as GeocodeResult[];
-  const hit = results[0];
+  return results
+    .map(normalizeSuggestion)
+    .sort((a, b) => scoreUtahCountySuggestion(b) - scoreUtahCountySuggestion(a))
+    .slice(0, 5);
+}
+
+async function geocodeLocation(query: string) {
+  const suggestions = await searchLocations(query);
+  const hit = suggestions[0];
   if (!hit) {
     throw new Error(`No results found for "${query}".`);
   }
 
   return {
-    label: hit.display_name,
-    lat: Number(hit.lat),
-    lon: Number(hit.lon)
+    label: hit.label,
+    lat: hit.lat,
+    lon: hit.lon
   };
 }
 
@@ -296,7 +359,9 @@ export default function Page() {
     destination: '',
     loading: false,
     error: '',
-    result: null
+    result: null,
+    originSuggestions: [],
+    destinationSuggestions: []
   });
 
   useEffect(() => {
@@ -507,7 +572,9 @@ export default function Page() {
       destination: form.to,
       loading: false,
       error: '',
-      result: null
+      result: null,
+      originSuggestions: [],
+      destinationSuggestions: []
     });
     setDistanceLookupOpen(true);
   }
@@ -515,6 +582,67 @@ export default function Page() {
   function closeDistanceLookup() {
     setDistanceLookupOpen(false);
   }
+
+  function chooseDistanceLocation(field: 'origin' | 'destination', suggestion: PlaceSuggestion) {
+    setDistanceLookup((current) => ({
+      ...current,
+      [field]: suggestion.label,
+      error: '',
+      result: null,
+      originSuggestions: field === 'origin' ? [] : current.originSuggestions,
+      destinationSuggestions: field === 'destination' ? [] : current.destinationSuggestions
+    }));
+  }
+
+  useEffect(() => {
+    if (!distanceLookupOpen) return;
+
+    const query = distanceLookup.origin.trim();
+    if (!query) {
+      setDistanceLookup((current) => ({ ...current, originSuggestions: [] }));
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const suggestions = await searchLocations(query);
+        setDistanceLookup((current) =>
+          current.origin.trim() === query
+            ? { ...current, originSuggestions: suggestions }
+            : current
+        );
+      } catch {
+        setDistanceLookup((current) => ({ ...current, originSuggestions: [] }));
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [distanceLookup.origin, distanceLookupOpen]);
+
+  useEffect(() => {
+    if (!distanceLookupOpen) return;
+
+    const query = distanceLookup.destination.trim();
+    if (!query) {
+      setDistanceLookup((current) => ({ ...current, destinationSuggestions: [] }));
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const suggestions = await searchLocations(query);
+        setDistanceLookup((current) =>
+          current.destination.trim() === query
+            ? { ...current, destinationSuggestions: suggestions }
+            : current
+        );
+      } catch {
+        setDistanceLookup((current) => ({ ...current, destinationSuggestions: [] }));
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [distanceLookup.destination, distanceLookupOpen]);
 
   async function runDistanceLookup() {
     const origin = distanceLookup.origin.trim();
@@ -949,6 +1077,7 @@ export default function Page() {
               <div>
                 <h2 className="text-xl font-semibold">Distance lookup</h2>
                 <p className="mt-1 text-sm text-white/55">Look up the distance between two locations and copy it into Miles.</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.22em] text-white/35">Search favors Utah County, especially Orem and Provo.</p>
               </div>
               <button
                 type="button"
@@ -960,37 +1089,77 @@ export default function Page() {
             </div>
 
             <div className="mt-4 grid gap-3">
-              <label className="grid gap-2 text-sm text-white/70">
-                From
-                <input
-                  type="text"
-                  value={distanceLookup.origin}
-                  onChange={(event) =>
-                    setDistanceLookup((current) => ({
-                      ...current,
-                      origin: event.target.value
-                    }))
-                  }
-                  placeholder="123 Main St, Denver"
-                  className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
-                />
-              </label>
+              <div className="grid gap-2 text-sm text-white/70">
+                <label className="grid gap-2">
+                  From
+                  <input
+                    type="text"
+                    value={distanceLookup.origin}
+                    onChange={(event) =>
+                      setDistanceLookup((current) => ({
+                        ...current,
+                        origin: event.target.value,
+                        error: '',
+                        result: null
+                      }))
+                    }
+                    placeholder="123 Main St, Orem"
+                    className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
+                  />
+                </label>
 
-              <label className="grid gap-2 text-sm text-white/70">
-                To
-                <input
-                  type="text"
-                  value={distanceLookup.destination}
-                  onChange={(event) =>
-                    setDistanceLookup((current) => ({
-                      ...current,
-                      destination: event.target.value
-                    }))
-                  }
-                  placeholder="456 Market St, Denver"
-                  className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
-                />
-              </label>
+                {distanceLookup.originSuggestions.length > 0 ? (
+                  <div className="max-h-52 overflow-auto rounded-2xl border border-white/10 bg-black/40 p-2">
+                    {distanceLookup.originSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion.label}
+                        type="button"
+                        onClick={() => chooseDistanceLocation('origin', suggestion)}
+                        className="flex w-full flex-col rounded-xl px-3 py-2 text-left transition-colors hover:bg-white/10"
+                      >
+                        <span className="text-sm font-medium text-white">{suggestion.label}</span>
+                        {suggestion.subtitle ? <span className="mt-0.5 text-xs text-white/45">{suggestion.subtitle}</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-2 text-sm text-white/70">
+                <label className="grid gap-2">
+                  To
+                  <input
+                    type="text"
+                    value={distanceLookup.destination}
+                    onChange={(event) =>
+                      setDistanceLookup((current) => ({
+                        ...current,
+                        destination: event.target.value,
+                        error: '',
+                        result: null
+                      }))
+                    }
+                    placeholder="456 Market St, Provo"
+                    className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
+                  />
+                </label>
+
+                {distanceLookup.destinationSuggestions.length > 0 ? (
+                  <div className="max-h-52 overflow-auto rounded-2xl border border-white/10 bg-black/40 p-2">
+                    {distanceLookup.destinationSuggestions.map((suggestion) => (
+                      <button
+                        key={suggestion.label}
+                        type="button"
+                        onClick={() => chooseDistanceLocation('destination', suggestion)}
+                        className="flex w-full flex-col rounded-xl px-3 py-2 text-left transition-colors hover:bg-white/10"
+                      >
+                        <span className="text-sm font-medium text-white">{suggestion.label}</span>
+                        {suggestion.subtitle ? <span className="mt-0.5 text-xs text-white/45">{suggestion.subtitle}</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
 
               <button
                 type="button"
