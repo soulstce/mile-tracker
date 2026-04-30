@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type Tab = 'current' | 'add' | 'records' | 'settings';
 type PeriodStatus = 'open' | 'closed' | 'paid';
@@ -188,8 +188,8 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint: 
   );
 }
 
-function Badge({ children, tone }: { children: string; tone: 'open' | 'closed' | 'paid' }) {
-  const styles: Record<typeof tone, string> = {
+function Badge({ children, tone }: { children: string; tone: PeriodStatus }) {
+  const styles: Record<PeriodStatus, string> = {
     open: 'border-emerald-400/20 bg-emerald-400/12 text-emerald-300',
     closed: 'border-white/10 bg-white/8 text-white/70',
     paid: 'border-violet-400/20 bg-violet-400/12 text-violet-300'
