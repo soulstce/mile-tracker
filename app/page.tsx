@@ -368,10 +368,10 @@ function TabIcon({ name, active }: { name: IconName; active: boolean }) {
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <div className="min-w-0 rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-      <div className="text-[11px] uppercase tracking-[0.28em] text-white/40">{label}</div>
-      <div className="mt-2 break-words text-xl font-semibold tracking-tight text-white sm:text-2xl">{value}</div>
-      <div className="mt-1 text-sm text-white/55">{hint}</div>
+    <div className="min-w-0 overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-3 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-4">
+      <div className="truncate text-[10px] uppercase tracking-[0.22em] text-white/40 sm:text-[11px] sm:tracking-[0.28em]">{label}</div>
+      <div className="mt-2 truncate text-base font-semibold tracking-tight text-white sm:text-2xl">{value}</div>
+      <div className="mt-1 hidden truncate text-xs text-white/55 sm:block sm:text-sm">{hint}</div>
     </div>
   );
 }
@@ -830,7 +830,7 @@ export default function Page() {
                 </div>
               </section>
 
-              <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <section className="grid grid-cols-3 gap-2 sm:gap-3">
                 <StatCard label="All miles" value={allTimeTotals.miles.toFixed(1)} hint={`${state.periods.length} periods total`} />
                 <StatCard label="All reimbursement" value={formatCurrency(allTimeTotals.reimbursement)} hint="Local storage only" />
                 <StatCard label="Rate" value={formatCurrency(state.rate)} hint="Per mile" />
