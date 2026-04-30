@@ -41,6 +41,21 @@ type TripForm = {
   notes: string;
 };
 
+type DistanceLookupResult = {
+  origin: string;
+  destination: string;
+  miles: number;
+  source: string;
+};
+
+type DistanceLookupState = {
+  origin: string;
+  destination: string;
+  loading: boolean;
+  error: string;
+  result: DistanceLookupResult | null;
+};
+
 const STORAGE_KEY = 'mile-tracker-state';
 const DEFAULT_RATE = 0.5;
 const currency = new Intl.NumberFormat('en-US', {
@@ -80,6 +95,78 @@ const blankForm = (): TripForm => ({
   miles: '',
   notes: ''
 });
+
+type GeocodeResult = {
+  display_name: string;
+  lat: string;
+  lon: string;
+};
+
+async function geocodeLocation(query: string) {
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`);
+  if (!response.ok) {
+    throw new Error('Distance lookup is temporarily unavailable.');
+  }
+
+  const results = (await response.json()) as GeocodeResult[];
+  const hit = results[0];
+  if (!hit) {
+    throw new Error(`No results found for "${query}".`);
+  }
+
+  return {
+    label: hit.display_name,
+    lat: Number(hit.lat),
+    lon: Number(hit.lon)
+  };
+}
+
+function milesBetween(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const earthRadiusMiles = 3958.7613;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const deltaLat = toRadians(lat2 - lat1);
+  const deltaLon = toRadians(lon2 - lon1);
+  const startLat = toRadians(lat1);
+  const endLat = toRadians(lat2);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(startLat) * Math.cos(endLat) * Math.sin(deltaLon / 2) ** 2;
+  return 2 * earthRadiusMiles * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+async function lookupDistance(origin: string, destination: string) {
+  const [originPoint, destinationPoint] = await Promise.all([
+    geocodeLocation(origin),
+    geocodeLocation(destination)
+  ]);
+
+  try {
+    const routeResponse = await fetch(
+      `https://router.project-osrm.org/route/v1/driving/${originPoint.lon},${originPoint.lat};${destinationPoint.lon},${destinationPoint.lat}?overview=false&alternatives=false&steps=false`
+    );
+    if (routeResponse.ok) {
+      const routeData = (await routeResponse.json()) as { routes?: Array<{ distance?: number }> };
+      const routeDistance = routeData.routes?.[0]?.distance;
+      if (typeof routeDistance === 'number' && Number.isFinite(routeDistance)) {
+        return {
+          origin: originPoint.label,
+          destination: destinationPoint.label,
+          miles: routeDistance / 1609.344,
+          source: 'OpenStreetMap driving route'
+        } satisfies DistanceLookupResult;
+      }
+    }
+  } catch {
+    // Fall back to a straight-line estimate if routing is unavailable.
+  }
+
+  return {
+    origin: originPoint.label,
+    destination: destinationPoint.label,
+    miles: milesBetween(originPoint.lat, originPoint.lon, destinationPoint.lat, destinationPoint.lon),
+    source: 'straight-line estimate'
+  } satisfies DistanceLookupResult;
+}
 
 function createId() {
   if (typeof window !== 'undefined' && 'crypto' in window && window.crypto.randomUUID) {
@@ -203,6 +290,14 @@ export default function Page() {
   const [state, setState] = useState<AppState>(makeDefaultState);
   const [ready, setReady] = useState(false);
   const [form, setForm] = useState<TripForm>(blankForm);
+  const [distanceLookupOpen, setDistanceLookupOpen] = useState(false);
+  const [distanceLookup, setDistanceLookup] = useState<DistanceLookupState>({
+    origin: '',
+    destination: '',
+    loading: false,
+    error: '',
+    result: null
+  });
 
   useEffect(() => {
     try {
@@ -404,6 +499,63 @@ export default function Page() {
       ...state,
       rate: parsed
     });
+  }
+
+  function openDistanceLookup() {
+    setDistanceLookup({
+      origin: form.from,
+      destination: form.to,
+      loading: false,
+      error: '',
+      result: null
+    });
+    setDistanceLookupOpen(true);
+  }
+
+  function closeDistanceLookup() {
+    setDistanceLookupOpen(false);
+  }
+
+  async function runDistanceLookup() {
+    const origin = distanceLookup.origin.trim();
+    const destination = distanceLookup.destination.trim();
+
+    if (!origin || !destination) {
+      setDistanceLookup((current) => ({
+        ...current,
+        error: 'Enter both locations first.'
+      }));
+      return;
+    }
+
+    setDistanceLookup((current) => ({
+      ...current,
+      loading: true,
+      error: '',
+      result: null
+    }));
+
+    try {
+      const result = await lookupDistance(origin, destination);
+      setDistanceLookup((current) => ({
+        ...current,
+        loading: false,
+        error: '',
+        result
+      }));
+      setForm((current) => ({
+        ...current,
+        miles: result.miles.toFixed(1)
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Distance lookup failed.';
+      setDistanceLookup((current) => ({
+        ...current,
+        loading: false,
+        error: message,
+        result: null
+      }));
+    }
   }
 
   const statusLabel = featuredPeriod?.status ?? 'open';
@@ -637,6 +789,14 @@ export default function Page() {
                     >
                       Save trip
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={openDistanceLookup}
+                      className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-white/90 backdrop-blur-xl transition-all duration-200 active:scale-[0.98]"
+                    >
+                      Distance lookup
+                    </button>
                   </form>
                 )}
               </section>
@@ -776,6 +936,109 @@ export default function Page() {
         </main>
       </div>
 
+      {distanceLookupOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 px-4 py-4 backdrop-blur-sm sm:items-center">
+          <button
+            type="button"
+            aria-label="Close distance lookup"
+            className="absolute inset-0 cursor-default"
+            onClick={closeDistanceLookup}
+          />
+          <div className="relative w-full max-w-md rounded-[2rem] border border-white/10 bg-[#0f0b18] p-4 shadow-[0_30px_100px_rgba(0,0,0,0.55)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold">Distance lookup</h2>
+                <p className="mt-1 text-sm text-white/55">Look up the distance between two locations and copy it into Miles.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDistanceLookup}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm text-white/70 transition-colors hover:bg-white/10"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              <label className="grid gap-2 text-sm text-white/70">
+                From
+                <input
+                  type="text"
+                  value={distanceLookup.origin}
+                  onChange={(event) =>
+                    setDistanceLookup((current) => ({
+                      ...current,
+                      origin: event.target.value
+                    }))
+                  }
+                  placeholder="123 Main St, Denver"
+                  className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
+                />
+              </label>
+
+              <label className="grid gap-2 text-sm text-white/70">
+                To
+                <input
+                  type="text"
+                  value={distanceLookup.destination}
+                  onChange={(event) =>
+                    setDistanceLookup((current) => ({
+                      ...current,
+                      destination: event.target.value
+                    }))
+                  }
+                  placeholder="456 Market St, Denver"
+                  className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={runDistanceLookup}
+                disabled={distanceLookup.loading}
+                className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-violet-500 px-5 text-sm font-semibold text-white shadow-[0_18px_40px_rgba(168,85,247,0.35)] transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {distanceLookup.loading ? 'Looking up...' : 'Find distance'}
+              </button>
+
+              {distanceLookup.error ? (
+                <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-sm text-rose-200">
+                  {distanceLookup.error}
+                </div>
+              ) : null}
+
+              {distanceLookup.result ? (
+                <div className="rounded-2xl border border-violet-400/15 bg-violet-500/10 p-4 text-sm text-white/70">
+                  <div className="text-base font-semibold text-violet-100">
+                    {distanceLookup.result.miles.toFixed(1)} miles
+                  </div>
+                  <div className="mt-1 text-white/55">
+                    {distanceLookup.result.origin} → {distanceLookup.result.destination}
+                  </div>
+                  <div className="mt-1 text-xs uppercase tracking-[0.22em] text-white/40">
+                    {distanceLookup.result.source}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm((current) => ({
+                        ...current,
+                        miles: distanceLookup.result?.miles.toFixed(1) ?? current.miles,
+                        from: distanceLookup.origin.trim() || current.from,
+                        to: distanceLookup.destination.trim() || current.to
+                      }));
+                      setDistanceLookupOpen(false);
+                    }}
+                    className="mt-4 inline-flex min-h-11 items-center justify-center rounded-2xl border border-white/10 bg-black/20 px-4 text-sm font-medium text-white/85 transition-all duration-200 active:scale-[0.98]"
+                  >
+                    Use in trip
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <nav className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-[#05010a]/85 backdrop-blur-2xl safe-pb">
         <div className="mx-auto grid max-w-md grid-cols-4 gap-1 px-2 py-2">
           {navItems.map((item) => {
