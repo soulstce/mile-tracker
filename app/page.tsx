@@ -420,12 +420,8 @@ export default function Page() {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/8 to-transparent" />
 
       <div className="mx-auto flex min-h-screen max-w-md flex-col px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))]">
-        <header className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.32em] text-white/40">Mile Tracker</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight">iPhone-style mileage tracking.</h1>
-            <p className="mt-2 max-w-sm text-sm text-white/55">Track periods, trips, reimbursement, and exports in a calm native-feeling PWA.</p>
-          </div>
+        <header className="mb-4 flex items-center justify-between gap-4">
+          <p className="text-[11px] uppercase tracking-[0.32em] text-white/40">Mile Tracker</p>
           <div className="rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1.5 text-xs font-medium text-violet-200 shadow-[0_0_30px_rgba(168,85,247,0.18)] backdrop-blur-xl">
             {state.periods.length} periods
           </div>
@@ -551,7 +547,7 @@ export default function Page() {
                       addTrip();
                     }}
                   >
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <label className="grid gap-2 text-sm text-white/70">
                         Date
                         <input
@@ -576,7 +572,7 @@ export default function Page() {
                       </label>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <label className="grid gap-2 text-sm text-white/70">
                         Start time
                         <input
@@ -597,7 +593,7 @@ export default function Page() {
                       </label>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <label className="grid gap-2 text-sm text-white/70">
                         From
                         <input
