@@ -31,10 +31,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Mile Tracker" />
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="icon" href="/icon-192-v2.png" type="image/png" sizes="192x192" />
-        <link rel="icon" href="/icon-512-v2.png" type="image/png" sizes="512x512" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v2.png" />
+        <link rel="manifest" href="/manifest.json?v=3" />
+        <link rel="icon" href="/icon-192-v3.png" type="image/png" sizes="192x192" />
+        <link rel="icon" href="/icon-512-v3.png" type="image/png" sizes="512x512" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v3.png" />
         <link rel="mask-icon" href="/favicon.svg" color="#a855f7" />
       </head>
       <body>
