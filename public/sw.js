@@ -1,5 +1,5 @@
 const CACHE_NAME = 'mile-tracker-shell-v1';
-const APP_SHELL = ['/', '/manifest.json', '/icon.svg', '/apple-touch-icon.svg', '/favicon.svg'];
+const APP_SHELL = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png', '/favicon.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
