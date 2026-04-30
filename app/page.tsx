@@ -29,6 +29,7 @@ type Period = {
 type AppState = {
   rate: number;
   periods: Period[];
+  defaultLocation: string;
 };
 
 type TripForm = {
@@ -85,7 +86,8 @@ const makePeriod = (index: number): Period => ({
 
 const makeDefaultState = (): AppState => ({
   rate: DEFAULT_RATE,
-  periods: [makePeriod(1)]
+  periods: [makePeriod(1)],
+  defaultLocation: ''
 });
 
 const blankForm = (): TripForm => ({
@@ -120,11 +122,11 @@ type PlaceSuggestion = {
   lon: number;
 };
 
-const UTAH_COUNTY_VIEWBOX = {
-  left: -112.12,
-  top: 40.43,
-  right: -111.38,
-  bottom: 39.84
+const UTAH_STATE_VIEWBOX = {
+  left: -114.17,
+  top: 42.1,
+  right: -109.04,
+  bottom: 36.9
 };
 
 function formatSuggestionSubtitle(result: GeocodeResult) {
@@ -146,27 +148,16 @@ function normalizeSuggestion(result: GeocodeResult): PlaceSuggestion {
   };
 }
 
-function scoreUtahCountySuggestion(suggestion: PlaceSuggestion, query: string) {
+function scoreUtahSuggestion(suggestion: PlaceSuggestion, query: string) {
   const text = suggestion.label.toLowerCase();
+  const subtitle = suggestion.subtitle.toLowerCase();
   const queryText = query.toLowerCase();
   const queryTokens = queryText.split(/[^a-z0-9]+/).filter(Boolean);
-  const localHits = [
-    'orem',
-    'provo',
-    'pleasant grove',
-    'american fork',
-    'lehi',
-    'vineyard',
-    'saratoga springs',
-    'springville',
-    'utah county'
-  ];
-  const localMatches = localHits.reduce((count, term) => count + (text.includes(term) ? 1 : 0), 0);
-  const nearBonus = suggestion.lat >= 39.84 && suggestion.lat <= 40.43 && suggestion.lon >= -112.12 && suggestion.lon <= -111.38 ? 3 : 0;
   const tokenMatches = queryTokens.reduce((count, token) => count + (text.includes(token) ? 1 : 0), 0);
   const prefixMatch = queryTokens.some((token) => text.startsWith(token)) ? 1.5 : 0;
-  const importanceBonus = suggestion.label ? 0 : 0;
-  return nearBonus + localMatches * 1.5 + tokenMatches + prefixMatch + importanceBonus;
+  const utahBonus = subtitle.includes('utah') ? 1.5 : 0;
+  const importanceBonus = suggestion.label.length > 0 ? 0 : 0;
+  return tokenMatches + prefixMatch + utahBonus + importanceBonus;
 }
 
 function buildSearchQueries(query: string) {
@@ -174,17 +165,12 @@ function buildSearchQueries(query: string) {
   const lowered = normalized.toLowerCase();
   const variants = new Set<string>([normalized]);
 
-  const hasUtahContext = ['utah', 'provo', 'orem', 'ut county', 'utah county'].some((term) => lowered.includes(term));
+  const hasUtahContext = ['utah', 'ut ', ', ut', 'ut.'].some((term) => lowered.includes(term));
   if (!hasUtahContext) {
-    variants.add(`${normalized} Provo Utah County Utah`);
-    variants.add(`${normalized} Orem Utah County Utah`);
-    variants.add(`${normalized} Utah County Utah`);
+    variants.add(`${normalized}, Utah`);
     variants.add(`${normalized} Utah`);
-  }
-
-  if (normalized.split(/\s+/).length <= 2) {
-    variants.add(`${normalized} Provo UT`);
-    variants.add(`${normalized} Orem UT`);
+    variants.add(`${normalized}, UT`);
+    variants.add(`${normalized} UT`);
   }
 
   return [...variants].filter(Boolean);
@@ -195,7 +181,7 @@ async function searchLocations(query: string) {
   const settled = await Promise.allSettled(
     queries.map(async (searchQuery) => {
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=us&addressdetails=1&namedetails=1&accept-language=en&q=${encodeURIComponent(searchQuery)}&viewbox=${UTAH_COUNTY_VIEWBOX.left},${UTAH_COUNTY_VIEWBOX.top},${UTAH_COUNTY_VIEWBOX.right},${UTAH_COUNTY_VIEWBOX.bottom}&bounded=0`
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&countrycodes=us&addressdetails=1&namedetails=1&accept-language=en&q=${encodeURIComponent(searchQuery)}&viewbox=${UTAH_STATE_VIEWBOX.left},${UTAH_STATE_VIEWBOX.top},${UTAH_STATE_VIEWBOX.right},${UTAH_STATE_VIEWBOX.bottom}&bounded=0`
       );
       if (!response.ok) {
         throw new Error('Autocomplete is temporarily unavailable.');
@@ -218,7 +204,7 @@ async function searchLocations(query: string) {
   }
 
   return results
-    .sort((a, b) => scoreUtahCountySuggestion(b, query) - scoreUtahCountySuggestion(a, query))
+    .sort((a, b) => scoreUtahSuggestion(b, query) - scoreUtahSuggestion(a, query))
     .slice(0, 8);
 }
 
@@ -382,9 +368,9 @@ function TabIcon({ name, active }: { name: IconName; active: boolean }) {
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+    <div className="min-w-0 rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
       <div className="text-[11px] uppercase tracking-[0.28em] text-white/40">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-white">{value}</div>
+      <div className="mt-2 break-words text-xl font-semibold tracking-tight text-white sm:text-2xl">{value}</div>
       <div className="mt-1 text-sm text-white/55">{hint}</div>
     </div>
   );
@@ -406,6 +392,7 @@ export default function Page() {
   const [ready, setReady] = useState(false);
   const [form, setForm] = useState<TripForm>(blankForm);
   const [distanceLookupOpen, setDistanceLookupOpen] = useState(false);
+  const [originToolsOpen, setOriginToolsOpen] = useState(false);
   const [distanceLookup, setDistanceLookup] = useState<DistanceLookupState>({
     origin: '',
     destination: '',
@@ -420,9 +407,13 @@ export default function Page() {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as AppState;
+        const parsed = JSON.parse(raw) as Partial<AppState>;
         if (parsed?.periods?.length) {
-          setState(parsed);
+          setState({
+            rate: typeof parsed.rate === 'number' ? parsed.rate : DEFAULT_RATE,
+            periods: parsed.periods,
+            defaultLocation: typeof parsed.defaultLocation === 'string' ? parsed.defaultLocation : ''
+          });
         }
       }
     } catch {
@@ -452,6 +443,13 @@ export default function Page() {
   const featuredTotals = aggregate(featuredPeriod?.trips ?? [], state.rate);
   const allTrips = state.periods.flatMap((period) => period.trips);
   const allTimeTotals = aggregate(allTrips, state.rate);
+  const savedLocations = Array.from(
+    new Set(
+      [...allTrips.flatMap((trip) => [trip.from, trip.to]), state.defaultLocation]
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  );
   const recentTrips = [...(featuredPeriod?.trips ?? [])].slice(-4).reverse();
   const periodCards = [...state.periods].reverse();
   const activeTripAllowed = Boolean(openPeriod);
@@ -620,7 +618,7 @@ export default function Page() {
 
   function openDistanceLookup() {
     setDistanceLookup({
-      origin: form.from,
+      origin: form.from || state.defaultLocation,
       destination: form.to,
       loading: false,
       error: '',
@@ -628,11 +626,13 @@ export default function Page() {
       originSuggestions: [],
       destinationSuggestions: []
     });
+    setOriginToolsOpen(false);
     setDistanceLookupOpen(true);
   }
 
   function closeDistanceLookup() {
     setDistanceLookupOpen(false);
+    setOriginToolsOpen(false);
   }
 
   function chooseDistanceLocation(field: 'origin' | 'destination', suggestion: PlaceSuggestion) {
@@ -644,6 +644,33 @@ export default function Page() {
       originSuggestions: field === 'origin' ? [] : current.originSuggestions,
       destinationSuggestions: field === 'destination' ? [] : current.destinationSuggestions
     }));
+    if (field === 'origin') {
+      setOriginToolsOpen(false);
+    }
+  }
+
+  function setDefaultLocationFromCurrent() {
+    const nextDefault = distanceLookup.origin.trim();
+    if (!nextDefault) return;
+
+    updateState({
+      ...state,
+      defaultLocation: nextDefault
+    });
+    setOriginToolsOpen(false);
+  }
+
+  function useDefaultLocation() {
+    if (!state.defaultLocation) return;
+
+    setDistanceLookup((current) => ({
+      ...current,
+      origin: state.defaultLocation,
+      error: '',
+      result: null,
+      originSuggestions: []
+    }));
+    setOriginToolsOpen(false);
   }
 
   useEffect(() => {
@@ -803,7 +830,7 @@ export default function Page() {
                 </div>
               </section>
 
-              <section className="grid grid-cols-3 gap-3">
+              <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <StatCard label="All miles" value={allTimeTotals.miles.toFixed(1)} hint={`${state.periods.length} periods total`} />
                 <StatCard label="All reimbursement" value={formatCurrency(allTimeTotals.reimbursement)} hint="Local storage only" />
                 <StatCard label="Rate" value={formatCurrency(state.rate)} hint="Per mile" />
@@ -1129,7 +1156,7 @@ export default function Page() {
               <div>
                 <h2 className="text-xl font-semibold">Distance lookup</h2>
                 <p className="mt-1 text-sm text-white/55">Look up the distance between two locations and copy it into Miles.</p>
-                <p className="mt-2 text-xs uppercase tracking-[0.22em] text-white/35">Search favors Utah County, especially Orem and Provo.</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.22em] text-white/35">Search favors Utah broadly.</p>
               </div>
               <button
                 type="button"
@@ -1142,8 +1169,21 @@ export default function Page() {
 
             <div className="mt-4 grid gap-3">
               <div className="grid gap-2 text-sm text-white/70">
-                <label className="grid gap-2">
-                  From
+                <div className="relative grid gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-sm text-white/70">From</label>
+                    <button
+                      type="button"
+                      aria-label="Saved locations and default location"
+                      onClick={() => setOriginToolsOpen((current) => !current)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/75 transition-colors hover:bg-white/10"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+                        <path d="M12 21s6-4.5 6-10.2A6 6 0 0 0 6 10.8C6 16.5 12 21 12 21Z" stroke="currentColor" strokeWidth="1.8" />
+                        <circle cx="12" cy="10.6" r="1.8" stroke="currentColor" strokeWidth="1.8" />
+                      </svg>
+                    </button>
+                  </div>
                   <input
                     type="text"
                     value={distanceLookup.origin}
@@ -1155,10 +1195,59 @@ export default function Page() {
                         result: null
                       }))
                     }
-                    placeholder="123 Main St, Orem"
+                    placeholder="123 Main St, Salt Lake City"
                     className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
                   />
-                </label>
+
+                  {originToolsOpen ? (
+                    <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-10 rounded-2xl border border-white/10 bg-black/90 p-2 shadow-[0_18px_50px_rgba(0,0,0,0.45)]">
+                      {state.defaultLocation ? (
+                        <button
+                          type="button"
+                          onClick={useDefaultLocation}
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10"
+                        >
+                          <span>Use default location</span>
+                          <span className="text-xs text-violet-200">{state.defaultLocation}</span>
+                        </button>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        onClick={setDefaultLocationFromCurrent}
+                        disabled={!distanceLookup.origin.trim()}
+                        className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span>Set current as default</span>
+                        <span className="text-xs text-white/45">saved on this device</span>
+                      </button>
+
+                      {savedLocations.length > 0 ? (
+                        <div className="mt-2 max-h-52 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-white/5 p-1" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}>
+                          {savedLocations.map((location) => (
+                            <button
+                              key={location}
+                              type="button"
+                              onClick={() => {
+                                setDistanceLookup((current) => ({
+                                  ...current,
+                                  origin: location,
+                                  error: '',
+                                  result: null,
+                                  originSuggestions: []
+                                }));
+                                setOriginToolsOpen(false);
+                              }}
+                              className="w-full rounded-lg px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10"
+                            >
+                              {location}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
 
                 {distanceLookup.originSuggestions.length > 0 ? (
                   <div
@@ -1194,7 +1283,7 @@ export default function Page() {
                         result: null
                       }))
                     }
-                    placeholder="456 Market St, Provo"
+                    placeholder="456 Market St, Salt Lake City"
                     className="min-h-12 rounded-2xl border border-white/10 bg-black/30 px-4 text-white outline-none ring-0 placeholder:text-white/25 focus:border-violet-400/40"
                   />
                 </label>
