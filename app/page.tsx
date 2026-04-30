@@ -146,28 +146,80 @@ function normalizeSuggestion(result: GeocodeResult): PlaceSuggestion {
   };
 }
 
-function scoreUtahCountySuggestion(suggestion: PlaceSuggestion) {
+function scoreUtahCountySuggestion(suggestion: PlaceSuggestion, query: string) {
   const text = suggestion.label.toLowerCase();
-  const localHits = ['orem', 'provo', 'pleasant grove', 'american fork', 'lehi', 'vineyard', 'saratoga springs', 'springville', 'orem, ut', 'provo, ut'];
-  const cityBonus = localHits.some((term) => text.includes(term)) ? 2 : 0;
-  const countyBonus = text.includes('utah county') ? 1 : 0;
+  const queryText = query.toLowerCase();
+  const queryTokens = queryText.split(/[^a-z0-9]+/).filter(Boolean);
+  const localHits = [
+    'orem',
+    'provo',
+    'pleasant grove',
+    'american fork',
+    'lehi',
+    'vineyard',
+    'saratoga springs',
+    'springville',
+    'utah county'
+  ];
+  const localMatches = localHits.reduce((count, term) => count + (text.includes(term) ? 1 : 0), 0);
   const nearBonus = suggestion.lat >= 39.84 && suggestion.lat <= 40.43 && suggestion.lon >= -112.12 && suggestion.lon <= -111.38 ? 3 : 0;
-  return nearBonus + cityBonus + countyBonus;
+  const tokenMatches = queryTokens.reduce((count, token) => count + (text.includes(token) ? 1 : 0), 0);
+  const prefixMatch = queryTokens.some((token) => text.startsWith(token)) ? 1.5 : 0;
+  const importanceBonus = suggestion.label ? 0 : 0;
+  return nearBonus + localMatches * 1.5 + tokenMatches + prefixMatch + importanceBonus;
+}
+
+function buildSearchQueries(query: string) {
+  const normalized = query.trim();
+  const lowered = normalized.toLowerCase();
+  const variants = new Set<string>([normalized]);
+
+  const hasUtahContext = ['utah', 'provo', 'orem', 'ut county', 'utah county'].some((term) => lowered.includes(term));
+  if (!hasUtahContext) {
+    variants.add(`${normalized} Provo Utah County Utah`);
+    variants.add(`${normalized} Orem Utah County Utah`);
+    variants.add(`${normalized} Utah County Utah`);
+    variants.add(`${normalized} Utah`);
+  }
+
+  if (normalized.split(/\s+/).length <= 2) {
+    variants.add(`${normalized} Provo UT`);
+    variants.add(`${normalized} Orem UT`);
+  }
+
+  return [...variants].filter(Boolean);
 }
 
 async function searchLocations(query: string) {
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=7&countrycodes=us&addressdetails=1&accept-language=en&q=${encodeURIComponent(query)}&viewbox=${UTAH_COUNTY_VIEWBOX.left},${UTAH_COUNTY_VIEWBOX.top},${UTAH_COUNTY_VIEWBOX.right},${UTAH_COUNTY_VIEWBOX.bottom}&bounded=0`
+  const queries = buildSearchQueries(query);
+  const settled = await Promise.allSettled(
+    queries.map(async (searchQuery) => {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=us&addressdetails=1&namedetails=1&accept-language=en&q=${encodeURIComponent(searchQuery)}&viewbox=${UTAH_COUNTY_VIEWBOX.left},${UTAH_COUNTY_VIEWBOX.top},${UTAH_COUNTY_VIEWBOX.right},${UTAH_COUNTY_VIEWBOX.bottom}&bounded=0`
+      );
+      if (!response.ok) {
+        throw new Error('Autocomplete is temporarily unavailable.');
+      }
+      return (await response.json()) as GeocodeResult[];
+    })
   );
-  if (!response.ok) {
-    throw new Error('Autocomplete is temporarily unavailable.');
+
+  const results: PlaceSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const entry of settled) {
+    if (entry.status !== 'fulfilled') continue;
+    for (const raw of entry.value) {
+      const suggestion = normalizeSuggestion(raw);
+      const key = `${suggestion.label}|${suggestion.lat.toFixed(6)}|${suggestion.lon.toFixed(6)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(suggestion);
+    }
   }
 
-  const results = (await response.json()) as GeocodeResult[];
   return results
-    .map(normalizeSuggestion)
-    .sort((a, b) => scoreUtahCountySuggestion(b) - scoreUtahCountySuggestion(a))
-    .slice(0, 5);
+    .sort((a, b) => scoreUtahCountySuggestion(b, query) - scoreUtahCountySuggestion(a, query))
+    .slice(0, 8);
 }
 
 async function geocodeLocation(query: string) {
@@ -1109,7 +1161,10 @@ export default function Page() {
                 </label>
 
                 {distanceLookup.originSuggestions.length > 0 ? (
-                  <div className="max-h-52 overflow-auto rounded-2xl border border-white/10 bg-black/40 p-2">
+                  <div
+                    className="max-h-56 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-black/40 p-2"
+                    style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+                  >
                     {distanceLookup.originSuggestions.map((suggestion) => (
                       <button
                         key={suggestion.label}
@@ -1145,7 +1200,10 @@ export default function Page() {
                 </label>
 
                 {distanceLookup.destinationSuggestions.length > 0 ? (
-                  <div className="max-h-52 overflow-auto rounded-2xl border border-white/10 bg-black/40 p-2">
+                  <div
+                    className="max-h-56 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-black/40 p-2"
+                    style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+                  >
                     {distanceLookup.destinationSuggestions.map((suggestion) => (
                       <button
                         key={suggestion.label}
